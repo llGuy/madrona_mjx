@@ -127,10 +127,8 @@ struct Manager::Impl {
 
     inline void renderCommon()
     {
-        if (!useRaycaster) {
-            renderMgr.readECS();
-            renderMgr.batchRender();
-        }
+        renderMgr.readECS();
+        renderMgr.batchRender();
     }
 
     virtual Tensor exportTensor(ExportID slot,
