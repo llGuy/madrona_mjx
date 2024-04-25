@@ -105,7 +105,13 @@ struct Manager::Impl {
           renderMgr(std::move(render_mgr)),
           raycastOutputResolution(mgr_cfg.batchRenderViewWidth),
           useRaycaster(mgr_cfg.useRaycaster)
-    {}
+    {
+        if (useRaycaster) {
+            printf("Using raycaster\n");
+        } else {
+            printf("Using rasterizer\n");
+        }
+    }
 
     inline virtual ~Impl() {}
 

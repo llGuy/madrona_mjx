@@ -62,13 +62,16 @@ NB_MODULE(_madrona_mjx_batch_renderer, m) {
                 .numCams = (uint32_t)num_cams,
             };
 
+            const char *render_mode = getenv("MADRONA_RENDER_MODE");
+            assert(render_mode);
+
             new (self) Manager(Manager::Config {
                 .execMode = exec_mode,
                 .gpuID = (int)gpu_id,
                 .numWorlds = (uint32_t)num_worlds,
                 .batchRenderViewWidth = (uint32_t)batch_render_view_width,
                 .batchRenderViewHeight = (uint32_t)batch_render_view_height,
-                .useRaycaster = true
+                .useRaycaster = render_mode[0] == '2'
             }, mjx_model, viz_gpu_hdls != nullptr ? *viz_gpu_hdls :
                 Optional<VisualizerGPUHandles>::none());
         }, nb::arg("exec_mode"),
