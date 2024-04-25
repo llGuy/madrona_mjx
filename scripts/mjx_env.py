@@ -104,7 +104,7 @@ class BarkourEnv(PipelineEnv):
   ):
     path = epath.Path(os.path.join(
         pathlib.Path(__file__).parent.resolve(),
-        'mujoco_menagerie/google_barkour_vb/scene_mjx.xml'))
+        'google_barkour_vb_modded/scene_mjx.xml'))
     sys = mjcf.load(path.as_posix())
     self._dt = 0.02  # this environment is 50 fps
     sys = sys.tree_replace({'opt.timestep': 0.004, 'dt': 0.004})
