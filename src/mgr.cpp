@@ -392,6 +392,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
         // Currently a CPU sync is needed to read back the total number of
         // instances for Vulkan
         REQ_CUDA(cudaStreamSynchronize(strm));
+        gpuExec.getTimings();
         renderCommon();
 
         copyOutRendered(jax_io.rgbOut, jax_io.depthOut, strm);
