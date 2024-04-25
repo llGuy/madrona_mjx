@@ -29,6 +29,10 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &cfg)
         (uint32_t)ExportID::CameraPositions);
     registry.exportColumn<CameraEntity, Rotation>(
         (uint32_t)ExportID::CameraRotations);
+
+    registry.exportColumn<
+        render::RaycastOutputArchetype, render::RenderOutputBuffer>(
+                (uint32_t)ExportID::Raycast);
 }
 
 static void setupRenderTasks(TaskGraphBuilder &builder,

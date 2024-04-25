@@ -52,6 +52,7 @@ public:
         uint32_t numWorlds; // Simulation batch size
         uint32_t batchRenderViewWidth;
         uint32_t batchRenderViewHeight;
+        bool useRaycaster;
     };
 
     MGR_EXPORT Manager(
@@ -86,8 +87,14 @@ public:
     MGR_EXPORT madrona::py::Tensor rgbTensor() const;
     MGR_EXPORT madrona::py::Tensor depthTensor() const;
 
+    MGR_EXPORT madrona::py::Tensor raycastTensor() const;
+
     MGR_EXPORT uint32_t numWorlds() const;
     MGR_EXPORT madrona::render::RenderManager & getRenderManager();
+
+    MGR_EXPORT uint32_t numCams() const;
+    MGR_EXPORT uint32_t raycastOutputResolution() const;
+    MGR_EXPORT madrona::ExecMode execMode() const;
 
 private:
     struct Impl;

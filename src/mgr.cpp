@@ -89,6 +89,7 @@ struct Manager::Impl {
     uint32_t numCams;
     Optional<RenderGPUState> renderGPUState;
     render::RenderManager renderMgr;
+    uint32_t raycastOutputResolution;
 
     inline Impl(const Manager::Config &mgr_cfg,
                 uint32_t num_geoms,
@@ -99,7 +100,8 @@ struct Manager::Impl {
           numGeoms(num_geoms),
           numCams(num_cams),
           renderGPUState(std::move(render_gpu_state)),
-          renderMgr(std::move(render_mgr))
+          renderMgr(std::move(render_mgr)),
+          raycastOutputResolution(mgr_cfg.batchRenderViewWidth)
     {}
 
     inline virtual ~Impl() {}
@@ -116,8 +118,8 @@ struct Manager::Impl {
 
     inline void renderCommon()
     {
-        renderMgr.readECS();
-        renderMgr.batchRender();
+        // renderMgr.readECS();
+        // renderMgr.batchRender();
     }
 
     virtual Tensor exportTensor(ExportID slot,
@@ -226,7 +228,8 @@ struct Manager::CUDAImpl final : Manager::Impl {
         : Impl(mgr_cfg, num_geoms, num_cams,
                std::move(render_gpu_state), std::move(render_mgr)),
           gpuExec(std::move(gpu_exec)),
-          renderGraph(gpuExec.buildLaunchGraph(TaskGraphID::Render))
+          renderGraph(gpuExec.buildLaunchGraph(TaskGraphID::Render,
+                                               mgr_cfg.useRaycaster))
     {}
 
     inline virtual ~CUDAImpl() final {}
@@ -266,7 +269,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
                              Quat *cam_rotations) final
     {
         MWCudaLaunchGraph init_graph =
-            gpuExec.buildLaunchGraph(TaskGraphID::Init);
+            gpuExec.buildLaunchGraph(TaskGraphID::Init, false);
 
         copyInTransforms(geom_positions, geom_rotations,
                          cam_positions, cam_rotations, 0);
@@ -339,7 +342,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
     virtual void gpuStreamInit(cudaStream_t strm, void **buffers) final
     {
         MWCudaLaunchGraph init_graph =
-            gpuExec.buildLaunchGraph(TaskGraphID::Init);
+            gpuExec.buildLaunchGraph(TaskGraphID::Init, false);
 
         JAXIO jax_io = JAXIO::make(buffers);
 
@@ -393,7 +396,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
 };
 #endif
 
-static void loadRenderObjects(
+static imp::ImportedAssets loadRenderObjects(
     const MJXModelGeometry &geo,
     render::RenderManager &render_mgr)
 {
@@ -412,7 +415,8 @@ static void loadRenderObjects(
 
     std::array<char, 1024> import_err;
     auto disk_render_assets = imp::ImportedAssets::importFromDisk(
-        render_asset_cstrs, Span<char>(import_err.data(), import_err.size()));
+        render_asset_cstrs, Span<char>(import_err.data(), import_err.size()),
+        true, true);
 
     if (!disk_render_assets.has_value()) {
         FATAL("Failed to load render assets from disk: %s", import_err);
@@ -472,6 +476,8 @@ static void loadRenderObjects(
     render_mgr.configureLighting({
         { true, math::Vector3{1.0f, 1.0f, -2.0f}, math::Vector3{1.0f, 1.0f, 1.0f} }
     });
+
+    return std::move(*disk_render_assets);
 }
 
 Manager::Impl * Manager::Impl::make(
@@ -495,7 +501,16 @@ Manager::Impl * Manager::Impl::make(
             initRenderManager(mgr_cfg, mjx_model,
                               viz_gpu_hdls, render_gpu_state);
 
-        loadRenderObjects(mjx_model.meshGeo, render_mgr);
+        auto imported_assets = loadRenderObjects(
+                mjx_model.meshGeo, render_mgr);
+
+        auto gpu_imported_assets_opt = imp::ImportedAssets::makeGPUData(
+                imported_assets);
+
+        assert(gpu_imported_assets_opt.has_value());
+        auto gpu_imported_assets = std::move(*gpu_imported_assets_opt);
+
+
         sim_cfg.renderBridge = render_mgr.bridge();
 
         int32_t *geom_types_gpu = (int32_t *)cu::allocGPU(
@@ -518,6 +533,11 @@ Manager::Impl * Manager::Impl::make(
 
         HeapArray<Sim::WorldInit> world_inits(mgr_cfg.numWorlds);
 
+        uint32_t raycast_output_res = 0;
+        if (mgr_cfg.useRaycaster) {
+            raycast_output_res = mgr_cfg.batchRenderViewWidth;
+        }
+
         MWCudaExecutor gpu_exec({
             .worldInitPtr = world_inits.data(),
             .numWorldInitBytes = sizeof(Sim::WorldInit),
@@ -528,6 +548,8 @@ Manager::Impl * Manager::Impl::make(
             .numWorlds = mgr_cfg.numWorlds,
             .numTaskGraphs = (uint32_t)TaskGraphID::NumGraphs,
             .numExportedBuffers = (uint32_t)ExportID::NumExports, 
+            .geometryData = &gpu_imported_assets,
+            .raycastOutputResolution = raycast_output_res
         }, {
             { GPU_HIDESEEK_SRC_LIST },
             { GPU_HIDESEEK_COMPILE_FLAGS },
@@ -612,6 +634,11 @@ void Manager::render(math::Vector3 *geom_pos, math::Quat *geom_rot,
     impl_->render(geom_pos, geom_rot, cam_pos, cam_rot);
 }
 
+uint32_t Manager::numCams() const
+{
+    return impl_->numCams;
+}
+
 #ifdef MADRONA_CUDA_SUPPORT
 void Manager::gpuStreamInit(cudaStream_t strm, void **buffers)
 {
@@ -694,9 +721,32 @@ Tensor Manager::depthTensor() const
     }, impl_->cfg.gpuID);
 }
 
+Tensor Manager::raycastTensor() const
+{
+    uint32_t pixels_per_view = impl_->raycastOutputResolution *
+        impl_->raycastOutputResolution;
+
+    return impl_->exportTensor(ExportID::Raycast,
+                               TensorElementType::UInt8,
+                               {
+                                   impl_->cfg.numWorlds * impl_->numCams,
+                                   pixels_per_view * 3
+                               });
+}
+
 uint32_t Manager::numWorlds() const
 {
     return impl_->cfg.numWorlds;
+}
+
+uint32_t Manager::raycastOutputResolution() const 
+{
+    return impl_->raycastOutputResolution;
+}
+
+madrona::ExecMode Manager::execMode() const
+{
+    return impl_->cfg.execMode;
 }
 
 render::RenderManager & Manager::getRenderManager()
