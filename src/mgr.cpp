@@ -127,8 +127,10 @@ struct Manager::Impl {
 
     inline void renderCommon()
     {
-        renderMgr.readECS();
-        renderMgr.batchRender();
+        if (!useRaycaster) {
+            renderMgr.readECS();
+            renderMgr.batchRender();
+        }
     }
 
     virtual Tensor exportTensor(ExportID slot,
@@ -390,7 +392,9 @@ struct Manager::CUDAImpl final : Manager::Impl {
         // Currently a CPU sync is needed to read back the total number of
         // instances for Vulkan
         REQ_CUDA(cudaStreamSynchronize(strm));
-        gpuExec.getTimings();
+        if (useRaycaster) {
+            gpuExec.getTimings();
+        }
         renderCommon();
 
         copyOutRendered(jax_io.rgbOut, jax_io.depthOut, strm);
