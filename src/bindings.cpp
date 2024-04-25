@@ -68,6 +68,7 @@ NB_MODULE(_madrona_mjx_batch_renderer, m) {
                 .numWorlds = (uint32_t)num_worlds,
                 .batchRenderViewWidth = (uint32_t)batch_render_view_width,
                 .batchRenderViewHeight = (uint32_t)batch_render_view_height,
+                .useRaycaster = true
             }, mjx_model, viz_gpu_hdls != nullptr ? *viz_gpu_hdls :
                 Optional<VisualizerGPUHandles>::none());
         }, nb::arg("exec_mode"),

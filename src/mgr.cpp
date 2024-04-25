@@ -7,6 +7,7 @@
 #include <madrona/tracing.hpp>
 #include <madrona/mw_cpu.hpp>
 #include <madrona/render/api.hpp>
+#include <madrona/mesh_bvh.hpp>
 
 #include <array>
 #include <charconv>
@@ -90,6 +91,7 @@ struct Manager::Impl {
     Optional<RenderGPUState> renderGPUState;
     render::RenderManager renderMgr;
     uint32_t raycastOutputResolution;
+    bool useRaycaster;
 
     inline Impl(const Manager::Config &mgr_cfg,
                 uint32_t num_geoms,
@@ -101,7 +103,8 @@ struct Manager::Impl {
           numCams(num_cams),
           renderGPUState(std::move(render_gpu_state)),
           renderMgr(std::move(render_mgr)),
-          raycastOutputResolution(mgr_cfg.batchRenderViewWidth)
+          raycastOutputResolution(mgr_cfg.batchRenderViewWidth),
+          useRaycaster(mgr_cfg.useRaycaster)
     {}
 
     inline virtual ~Impl() {}
@@ -118,8 +121,10 @@ struct Manager::Impl {
 
     inline void renderCommon()
     {
-        // renderMgr.readECS();
-        // renderMgr.batchRender();
+        if (!useRaycaster) {
+            renderMgr.readECS();
+            renderMgr.batchRender();
+        }
     }
 
     virtual Tensor exportTensor(ExportID slot,
@@ -435,7 +440,10 @@ static imp::ImportedAssets loadRenderObjects(
         }
     }
 
+    auto embree_loader = Optional<imp::EmbreeLoader>::none();
+
     const CountT num_meshes = (CountT)geo.numMeshes;
+
     for (CountT mesh_idx = 0; mesh_idx < num_meshes; mesh_idx++) {
         uint32_t mesh_vert_offset = geo.vertexOffsets[mesh_idx];
         uint32_t next_vert_offset = mesh_idx < num_meshes - 1 ?
@@ -465,6 +473,56 @@ static imp::ImportedAssets loadRenderObjects(
         objs[num_disk_objs + mesh_idx] = {
             .meshes = Span<SourceMesh>(&meshes[mesh_idx], 1),
         };
+
+
+
+        /// Copy to disk render assets
+        // Need to copy everything over to the disk render assets.
+
+        DynArray<math::Vector3> vertices(mesh_num_verts);
+        memcpy(vertices.data(), geo.vertices + mesh_vert_offset,
+                sizeof(math::Vector3) * mesh_num_verts);
+
+        DynArray<uint32_t> indices(mesh_num_tris * 3);
+        memcpy(indices.data(), geo.indices + mesh_idx_offset,
+                sizeof(uint32_t) * mesh_num_tris * 3);
+
+        DynArray<SourceMesh> meshes_copy{ 0 };
+        meshes_copy.push_back(SourceMesh{
+            .positions = vertices.data(),
+            .normals = nullptr,
+            .tangentAndSigns = nullptr,
+            .uvs = nullptr,
+            .indices = indices.data(),
+            .faceCounts = nullptr,
+            .faceMaterials = nullptr,
+            .numVertices = mesh_num_verts,
+            .numFaces = mesh_num_tris,
+            .materialIDX = 0,
+        });
+
+        SourceObject obj_copy = {
+            .meshes = Span<SourceMesh>(
+                    meshes_copy.data(), 1),
+            .bvhIndex = 0
+        };
+
+        DynArray<render::MeshBVH> mesh_bvhs{ 0 };
+
+        Optional<render::MeshBVH> bvh = embree_loader->load(
+                obj_copy);
+
+        assert(bvh.has_value());
+        mesh_bvhs.push_back(*bvh);
+
+        disk_render_assets->geoData.meshArrays.push_back(
+                std::move(meshes_copy));
+        disk_render_assets->geoData.positionArrays.push_back(
+                std::move(vertices));
+        disk_render_assets->geoData.indexArrays.push_back(
+                std::move(indices));
+        disk_render_assets->geoData.meshBVHArrays.push_back(
+                std::move(mesh_bvhs));
     }
 
     auto materials = std::to_array<imp::SourceMaterial>({

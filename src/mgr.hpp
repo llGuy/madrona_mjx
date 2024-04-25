@@ -52,7 +52,7 @@ public:
         uint32_t numWorlds; // Simulation batch size
         uint32_t batchRenderViewWidth;
         uint32_t batchRenderViewHeight;
-        bool useRaycaster;
+        bool useRaycaster = true;
     };
 
     MGR_EXPORT Manager(
