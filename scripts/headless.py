@@ -28,7 +28,7 @@ def profile_loop(mjx_wrapper, renderer):
     def iter(i, carry):
         mjx_wrapper, renderer = carry
 
-        #mjx_wrapper = mjx_wrapper.step()
+        mjx_wrapper = mjx_wrapper.step()
         renderer, rgb, depth = renderer.render(mjx_wrapper.mjx_state)
 
         return mjx_wrapper, renderer
