@@ -4,3 +4,6 @@
 [submodule "scripts/mujoco_menagerie"]
 	path = scripts/mujoco_menagerie
 	url = https://github.com/google-deepmind/mujoco_menagerie
+[submodule "external/bps3D"]
+	path = external/bps3D
+	url = https://github.com/shacklettbp/bps3D.git
