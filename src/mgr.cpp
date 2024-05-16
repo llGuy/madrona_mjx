@@ -240,7 +240,8 @@ struct Manager::CUDAImpl final : Manager::Impl {
                std::move(render_gpu_state), std::move(render_mgr)),
           gpuExec(std::move(gpu_exec)),
           renderGraph(gpuExec.buildLaunchGraph(TaskGraphID::Render,
-                                               mgr_cfg.useRaycaster))
+                                               mgr_cfg.useRaycaster,
+                                               "render_sort"))
     {}
 
     inline virtual ~CUDAImpl() final {}
@@ -393,7 +394,8 @@ struct Manager::CUDAImpl final : Manager::Impl {
         // instances for Vulkan
         REQ_CUDA(cudaStreamSynchronize(strm));
         if (useRaycaster) {
-            gpuExec.getTimings();
+            printf("Calling getTimings()\n");
+            gpuExec.getTimings(renderGraph);
         }
         renderCommon();
 
@@ -519,7 +521,7 @@ static imp::ImportedAssets loadRenderObjects(
         DynArray<render::MeshBVH> mesh_bvhs{ 0 };
 
         Optional<render::MeshBVH> bvh = embree_loader->load(
-                obj_copy);
+                obj_copy, {});
 
         assert(bvh.has_value());
         mesh_bvhs.push_back(*bvh);
@@ -616,7 +618,8 @@ Manager::Impl * Manager::Impl::make(
             .numTaskGraphs = (uint32_t)TaskGraphID::NumGraphs,
             .numExportedBuffers = (uint32_t)ExportID::NumExports, 
             .geometryData = &gpu_imported_assets,
-            .raycastOutputResolution = raycast_output_res
+            .raycastOutputResolution = raycast_output_res,
+            .nearSphere = 0.1f
         }, {
             { GPU_HIDESEEK_SRC_LIST },
             { GPU_HIDESEEK_COMPILE_FLAGS },
