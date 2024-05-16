@@ -26,6 +26,8 @@ using namespace madrona::math;
 using namespace madrona::phys;
 using namespace madrona::py;
 
+using bps3D::BPS3DState;
+
 namespace madMJX {
 
 struct RenderGPUState {
@@ -53,12 +55,16 @@ static inline Optional<RenderGPUState> initRenderGPUState(
     };
 }
 
-static inline render::RenderManager initRenderManager(
+static inline Optional<render::RenderManager> initRenderManager(
     const Manager::Config &mgr_cfg,
     const MJXModel &mjx_model,
     const Optional<VisualizerGPUHandles> &viz_gpu_hdls,
     const Optional<RenderGPUState> &render_gpu_state)
 {
+    if (mgr_cfg.useRaycaster || mgr_cfg.useBPS3D) {
+        return Optional<render::RenderManager>::none();
+    }
+
     render::APIBackend *render_api;
     render::GPUDevice *render_dev;
 
@@ -89,25 +95,32 @@ struct Manager::Impl {
     uint32_t numGeoms;
     uint32_t numCams;
     Optional<RenderGPUState> renderGPUState;
-    render::RenderManager renderMgr;
+    Optional<render::RenderManager> renderMgr;
+    Optional<BPS3DState> bps3DState;
+    bps3D::BPSBridge bpsBridge;
     uint32_t raycastOutputResolution;
-    bool useRaycaster;
 
     inline Impl(const Manager::Config &mgr_cfg,
                 uint32_t num_geoms,
                 uint32_t num_cams,
                 Optional<RenderGPUState> &&render_gpu_state,
-                render::RenderManager &&render_mgr)
+                Optional<render::RenderManager> &&render_mgr,
+                Optional<BPS3DState> &&bps_state,
+                BPSBridge bps_bridge
+            )
         : cfg(mgr_cfg),
           numGeoms(num_geoms),
           numCams(num_cams),
           renderGPUState(std::move(render_gpu_state)),
           renderMgr(std::move(render_mgr)),
-          raycastOutputResolution(mgr_cfg.batchRenderViewWidth),
-          useRaycaster(mgr_cfg.useRaycaster)
+          bps3DState(std::move(bps_state)),
+          bpsBridge(bps_bridge),
+          raycastOutputResolution(mgr_cfg.batchRenderViewWidth)
     {
-        if (useRaycaster) {
+        if (cfg.useRaycaster) {
             printf("Using raycaster\n");
+        } else if (cfg.useBPS3D) {
+            printf("Using BPS3D\n");
         } else {
             printf("Using rasterizer\n");
         }
@@ -127,7 +140,7 @@ struct Manager::Impl {
 
     inline void renderCommon()
     {
-        if (!useRaycaster) {
+        if (!cfg.useRaycaster) {
             renderMgr.readECS();
             renderMgr.batchRender();
         }
@@ -393,7 +406,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
         // Currently a CPU sync is needed to read back the total number of
         // instances for Vulkan
         REQ_CUDA(cudaStreamSynchronize(strm));
-        if (useRaycaster) {
+        if (cfg.useRaycaster) {
             printf("Calling getTimings()\n");
             gpuExec.getTimings(renderGraph);
         }

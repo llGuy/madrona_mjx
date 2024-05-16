@@ -13,6 +13,7 @@ target_link_libraries(madmjx_cpu_impl
         madrona_common
         madrona_mw_physics
         madrona_rendering_system
+        bps3D
 )
 
 add_library(madmjx_mgr SHARED
@@ -28,6 +29,9 @@ target_link_libraries(madmjx_mgr
         madrona_importer
         madrona_physics_loader
         madrona_render
+        bps3D
+        glm
+        stb
 )
 
 if (TARGET madrona_mw_gpu)
@@ -67,7 +71,7 @@ if (TARGET madrona_viz)
     )
 
     target_link_libraries(_madrona_mjx_visualizer PRIVATE 
-        madrona_viz madmjx_mgr
+        madrona_viz madmjx_mgr bps3D
     )
 
     if (TARGET madrona_cuda)

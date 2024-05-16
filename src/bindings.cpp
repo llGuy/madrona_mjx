@@ -72,6 +72,7 @@ NB_MODULE(_madrona_mjx_batch_renderer, m) {
                 .batchRenderViewWidth = (uint32_t)batch_render_view_width,
                 .batchRenderViewHeight = (uint32_t)batch_render_view_height,
                 .useRaycaster = render_mode[0] == '2'
+                .useBPS3D = render_mode[0] == '3'
             }, mjx_model, viz_gpu_hdls != nullptr ? *viz_gpu_hdls :
                 Optional<VisualizerGPUHandles>::none());
         }, nb::arg("exec_mode"),
