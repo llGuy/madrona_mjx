@@ -2,6 +2,8 @@
 
 #include "sim.hpp"
 
+#include <bps3D_madrona_systems.hpp>
+
 using namespace madrona;
 using namespace madrona::math;
 using namespace madrona::phys;
@@ -16,6 +18,10 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &cfg)
 {
     base::registerTypes(registry);
     RenderingSystem::registerTypes(registry, cfg.renderBridge);
+
+    if (cfg.bpsBridge != nullptr) {
+        bps3D::bpsRegisterTypes(registry);
+    }
 
     registry.registerArchetype<RenderEntity>();
     registry.registerArchetype<CameraEntity>();
@@ -36,9 +42,14 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &cfg)
 }
 
 static void setupRenderTasks(TaskGraphBuilder &builder,
-                             Span<const TaskGraphNodeID> deps)
+                             Span<const TaskGraphNodeID> deps,
+                             const Config &cfg)
 {
-    RenderingSystem::setupTasks(builder, deps);
+    if (!cfg.bpsBridge) {
+        RenderingSystem::setupTasks(builder, deps);
+    } else {
+        bps3D::setupTasks(builder);
+    }
 }
 
 #ifdef MADRONA_GPU_MODE
@@ -55,7 +66,7 @@ TaskGraph::NodeID queueSortByWorld(TaskGraph::Builder &builder,
 }
 #endif
 
-static void setupInitTasks(TaskGraphBuilder &builder)
+static void setupInitTasks(TaskGraphBuilder &builder, const Config &cfg)
 {
 #ifdef MADRONA_GPU_MODE
     auto sort_sys = queueSortByWorld<CameraEntity>(builder, {});
@@ -63,19 +74,19 @@ static void setupInitTasks(TaskGraphBuilder &builder)
 
     setupRenderTasks(builder, {sort_sys});
 #else
-    setupRenderTasks(builder, {});
+    setupRenderTasks(builder, {}, cfg);
 #endif
 }
 
 // Build the task graph
-void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const Config &)
+void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const Config &cfg)
 {
     TaskGraphBuilder &init_builder = taskgraph_mgr.init(TaskGraphID::Init);
-    setupInitTasks(init_builder);
+    setupInitTasks(init_builder, cfg);
 
     TaskGraphBuilder &render_tasks_builder =
         taskgraph_mgr.init(TaskGraphID::Render);
-    setupRenderTasks(render_tasks_builder, {});
+    setupRenderTasks(render_tasks_builder, {}, cfg);
 }
 
 Sim::Sim(Engine &ctx,
@@ -83,7 +94,9 @@ Sim::Sim(Engine &ctx,
          const WorldInit &)
     : WorldBase(ctx)
 {
-    RenderingSystem::init(ctx, cfg.renderBridge);
+    if (!cfg.bpsBridge) {
+        RenderingSystem::init(ctx, cfg.renderBridge);
+    }
 
     for (CountT geom_idx = 0; geom_idx < (CountT)cfg.numGeoms; geom_idx++) {
         Entity instance = ctx.makeRenderableEntity<RenderEntity>();
@@ -124,8 +137,10 @@ Sim::Sim(Engine &ctx,
         Entity cam = ctx.makeEntity<CameraEntity>();
         ctx.get<Position>(cam) = Vector3::zero();
         ctx.get<Rotation>(cam) = Quat { 1, 0, 0, 0 };
-        render::RenderingSystem::attachEntityToView(
-            ctx, cam, 60.f, 0.001f, Vector3::zero());
+        if (!cfg.bpsBridge) {
+            render::RenderingSystem::attachEntityToView(
+                ctx, cam, 60.f, 0.001f, Vector3::zero());
+        }
     }
 }
 

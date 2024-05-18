@@ -53,7 +53,11 @@ public:
         uint32_t batchRenderViewWidth;
         uint32_t batchRenderViewHeight;
         bool useRaycaster = true;
+<<<<<<< HEAD
         bool useBPS3D = true;
+=======
+        uint32_t raycastOutputResolution = 64;
+>>>>>>> main
     };
 
     MGR_EXPORT Manager(
@@ -92,6 +96,8 @@ public:
 
     MGR_EXPORT uint32_t numWorlds() const;
     MGR_EXPORT madrona::render::RenderManager & getRenderManager();
+
+    void bpsDumpRGB() const;
 
     MGR_EXPORT uint32_t numCams() const;
     MGR_EXPORT uint32_t raycastOutputResolution() const;
