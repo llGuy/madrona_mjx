@@ -19,10 +19,10 @@ args = arg_parser.parse_args()
 mjx_wrapper = MJXEnvAndPolicy.create(random.key(0), 1)
 m = mjx_wrapper.env.sys
 
-mesh_verts = m.mesh_vert
-mesh_faces = m.mesh_face
-mesh_vert_offsets = m.mesh_vertadr
-mesh_face_offsets = m.mesh_faceadr
+mesh_verts = np.array(m.mesh_vert, dtype=np.float32)
+mesh_faces = np.array(m.mesh_face, dtype=np.int32)
+mesh_vert_offsets = np.array(m.mesh_vertadr, dtype=np.int32)
+mesh_face_offsets = np.array(m.mesh_faceadr, dtype=np.int32)
 geom_types = m.geom_type
 geom_data_ids = m.geom_dataid
 geom_sizes = jax.device_get(m.geom_size)
@@ -31,6 +31,68 @@ gltf_buffer_views = []
 gltf_accessors = []
 gltf_meshes = []
 gltf_instances = []
+
+def load_obj(filename):
+    vertices = []
+    uvs = []
+    normals = []
+    indices = []
+
+    with open(filename, 'r') as file:
+        for line in file:
+            if line.startswith('v '):
+                vertices.append(list(map(float, line.split()[1:])))
+            elif line.startswith('vt '):
+                uvs.append(list(map(float, line.split()[1:])))
+            elif line.startswith('vn '):
+                normals.append(list(map(float, line.split()[1:])))
+            elif line.startswith('f '):
+                for triple in line.split()[1:]:
+                    idx = int(triple.split('/')[0]) - 1
+                    indices.append(idx)
+
+    return vertices, uvs, normals, indices
+
+plane_obj = load_obj("data/plane.obj")
+sphere_obj = load_obj("data/sphere.obj")
+
+def prepend_verts(verts):
+    global mesh_verts
+    global mesh_vert_offsets
+
+    verts = np.array(verts, dtype=np.float32)
+    print(verts.shape)
+
+    mesh_vert_offsets[:] += verts.shape[0]
+    mesh_vert_offsets = np.insert(mesh_vert_offsets, 0, 0)
+
+    mesh_verts = np.concatenate(
+        [verts, mesh_verts], axis=0)
+
+def prepend_faces(idxs):
+    global mesh_faces
+    global mesh_face_offsets
+
+    faces = np.array(idxs, dtype=np.int32).reshape(-1, 3)
+    print(faces.shape)
+
+    mesh_face_offsets[:] += faces.shape[0]
+    mesh_face_offsets = np.insert(mesh_face_offsets, 0, 0)
+
+    mesh_faces = np.concatenate(
+        [faces, mesh_faces], axis=0)
+
+prepend_verts(plane_obj[0])
+prepend_verts(sphere_obj[0])
+
+prepend_faces(plane_obj[-1])
+prepend_faces(sphere_obj[-1])
+
+print(mesh_verts.dtype)
+print(mesh_vert_offsets.dtype)
+
+print(mesh_faces.dtype)
+print(mesh_face_offsets.dtype)
 
 for i in range(len(mesh_vert_offsets)):
     vert_offset = mesh_vert_offsets[i]
@@ -104,7 +166,27 @@ for i in range(len(geom_sizes)):
 
     if geom_type == 7:
         gltf_instances.append(pygltflib.Node(
-            mesh=int(geom_data_ids[i]),
+            mesh=2 + int(geom_data_ids[i]),
+            matrix=[
+                float(mat[0][0]), float(mat[1][0]), float(mat[2][0]), 0,
+                float(mat[0][1]), float(mat[1][1]), float(mat[2][1]), 0,
+                float(mat[0][2]), float(mat[1][2]), float(mat[2][2]), 0,
+                float(pos[0]),    float(pos[1]),    float(pos[2]),    1,
+            ],
+        ))
+    elif geom_type == 0:
+        gltf_instances.append(pygltflib.Node(
+            mesh=0,
+            matrix=[
+                float(mat[0][0]), float(mat[1][0]), float(mat[2][0]), 0,
+                float(mat[0][1]), float(mat[1][1]), float(mat[2][1]), 0,
+                float(mat[0][2]), float(mat[1][2]), float(mat[2][2]), 0,
+                float(pos[0]),    float(pos[1]),    float(pos[2]),    1,
+            ],
+        ))
+    elif geom_type == 2:
+        gltf_instances.append(pygltflib.Node(
+            mesh=1,
             matrix=[
                 float(mat[0][0]), float(mat[1][0]), float(mat[2][0]), 0,
                 float(mat[0][1]), float(mat[1][1]), float(mat[2][1]), 0,
