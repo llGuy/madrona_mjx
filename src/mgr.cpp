@@ -68,7 +68,7 @@ static inline Optional<render::RenderManager> initRenderManager(
     const Optional<VisualizerGPUHandles> &viz_gpu_hdls,
     const Optional<RenderGPUState> &render_gpu_state)
 {
-    if (mgr_cfg.useRaycaster || mgr_cfg.useBPS3D) {
+    if (mgr_cfg.useBPS3D) {
         return Optional<render::RenderManager>::none();
     }
 
@@ -132,7 +132,7 @@ struct Manager::Impl {
           numCams(num_cams),
           renderGPUState(std::move(render_gpu_state)),
           renderMgr(std::move(render_mgr)),
-          bps3DState(std::move(bps_state)),
+          bps3DState(std::move(bps_3d_state)),
           bpsBridge(bps_bridge),
           raycastOutputResolution(mgr_cfg.batchRenderViewWidth)
     {
@@ -196,7 +196,7 @@ struct Manager::CPUImpl final : Manager::Impl {
                    TaskGraphT &&cpu_exec)
         : Impl(mgr_cfg, num_geoms, num_cams,
                std::move(render_gpu_state), std::move(render_mgr),
-               std::move(bps_bridge), std::move(bps_bridge)),
+               std::move(bps_3d_state), std::move(bps_bridge)),
           cpuExec(std::move(cpu_exec))
     {}
 
@@ -377,7 +377,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
     inline void copyOutRendered(uint8_t *rgb_out, float *depth_out,
                                 cudaStream_t strm)
     {
-        cudaMemcpyAsync(rgb_out, renderMgr.batchRendererRGBOut(),
+        cudaMemcpyAsync(rgb_out, renderMgr->batchRendererRGBOut(),
                         sizeof(uint8_t) * 4 *
                         (size_t)cfg.batchRenderViewWidth *
                         (size_t)cfg.batchRenderViewHeight *
@@ -385,7 +385,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
                         (size_t)numCams,
                         cudaMemcpyDeviceToDevice, strm);
 
-        cudaMemcpyAsync(depth_out, renderMgr.batchRendererDepthOut(),
+        cudaMemcpyAsync(depth_out, renderMgr->batchRendererDepthOut(),
                         sizeof(float) *
                         (size_t)cfg.batchRenderViewWidth *
                         (size_t)cfg.batchRenderViewHeight *
@@ -464,7 +464,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
 
 static imp::ImportedAssets loadRenderObjects(
     const MJXModelGeometry &geo,
-    render::RenderManager &render_mgr)
+    Optional<render::RenderManager> &render_mgr)
 {
     using namespace imp;
 
@@ -590,11 +590,13 @@ static imp::ImportedAssets loadRenderObjects(
         { render::rgb8ToFloat(255, 255, 255), -1, 0.8f, 0.2f },
     });
 
-    render_mgr.loadObjects(objs, materials, {});
+    if (render_mgr.has_value()) {
+        render_mgr->loadObjects(objs, materials, {});
 
-    render_mgr.configureLighting({
-        { true, math::Vector3{1.0f, 1.0f, -2.0f}, math::Vector3{1.0f, 1.0f, 1.0f} }
-    });
+        render_mgr->configureLighting({
+            { true, math::Vector3{1.0f, 1.0f, -2.0f}, math::Vector3{1.0f, 1.0f, 1.0f} }
+        });
+    }
 
     return std::move(*disk_render_assets);
 }
@@ -630,19 +632,19 @@ Manager::Impl * Manager::Impl::make(
         auto gpu_imported_assets = std::move(*gpu_imported_assets_opt);
 
         if (render_mgr.has_value()) {
-            sim_cfg.renderBridge = render_mgr.bridge();
+            sim_cfg.renderBridge = render_mgr->bridge();
         } else {
             sim_cfg.renderBridge = nullptr;
         }
 
-        Optional<BPS3DState> bps3D_state = initBPS3D(cfg);
+        Optional<BPS3DState> bps3D_state = initBPS3D(mgr_cfg);
 
         BPSBridge bps_bridge {};
 
         if (bps3D_state.has_value()) {
             CountT max_render_entities_per_world = mjx_model.numGeoms;
 
-            sim_cfg.bpsBridge = bps3D::initBridge(bps_bridge, cfg.numWorlds,
+            sim_cfg.bpsBridge = bps3D::initBridge(bps_bridge, mgr_cfg.numWorlds,
                                                   max_render_entities_per_world);
         } else {
             sim_cfg.bpsBridge = nullptr;
@@ -703,7 +705,7 @@ Manager::Impl * Manager::Impl::make(
             mjx_model.numCams,
             std::move(render_gpu_state),
             std::move(render_mgr),
-            std::move(bps_3d_state),
+            std::move(bps3D_state),
             std::move(bps_bridge),
             std::move(gpu_exec),
         };
@@ -715,12 +717,16 @@ Manager::Impl * Manager::Impl::make(
         Optional<RenderGPUState> render_gpu_state =
             initRenderGPUState(mgr_cfg, viz_gpu_hdls);
 
-        render::RenderManager render_mgr =
+        Optional<render::RenderManager> render_mgr =
             initRenderManager(mgr_cfg, mjx_model,
                               viz_gpu_hdls, render_gpu_state);
 
         loadRenderObjects(mjx_model.meshGeo, render_mgr);
-        sim_cfg.renderBridge = render_mgr.bridge();
+        if (render_mgr.has_value()) {
+            sim_cfg.renderBridge = render_mgr->bridge();
+        } else {
+            sim_cfg.renderBridge = nullptr;
+        }
 
         sim_cfg.geomTypes = mjx_model.geomTypes;
         sim_cfg.geomDataIDs = mjx_model.geomDataIDs;

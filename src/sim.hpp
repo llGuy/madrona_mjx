@@ -6,7 +6,13 @@
 
 #include "types.hpp"
 
+#include <bps3D_madrona_bridge.hpp>
+
 namespace madMJX {
+
+using bps3D::BPSCamera;
+using bps3D::BPSInstance;
+using bps3D::BPSBridge;
 
 class Engine;
 

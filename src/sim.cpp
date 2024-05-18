@@ -43,7 +43,7 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &cfg)
 
 static void setupRenderTasks(TaskGraphBuilder &builder,
                              Span<const TaskGraphNodeID> deps,
-                             const Config &cfg)
+                             const Sim::Config &cfg)
 {
     if (!cfg.bpsBridge) {
         RenderingSystem::setupTasks(builder, deps);
@@ -66,7 +66,7 @@ TaskGraph::NodeID queueSortByWorld(TaskGraph::Builder &builder,
 }
 #endif
 
-static void setupInitTasks(TaskGraphBuilder &builder, const Config &cfg)
+static void setupInitTasks(TaskGraphBuilder &builder, const Sim::Config &cfg)
 {
 #ifdef MADRONA_GPU_MODE
     auto sort_sys = queueSortByWorld<CameraEntity>(builder, {});

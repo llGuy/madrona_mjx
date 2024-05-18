@@ -53,11 +53,8 @@ public:
         uint32_t batchRenderViewWidth;
         uint32_t batchRenderViewHeight;
         bool useRaycaster = true;
-<<<<<<< HEAD
         bool useBPS3D = true;
-=======
         uint32_t raycastOutputResolution = 64;
->>>>>>> main
     };
 
     MGR_EXPORT Manager(
