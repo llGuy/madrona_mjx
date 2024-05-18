@@ -403,6 +403,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
 
         copyInTransforms(jax_io.geomPositions, jax_io.geomRotations,
                          jax_io.camPositions, jax_io.camRotations, strm);
+        REQ_CUDA(cudaStreamSynchronize(strm));
 
         gpuExec.runAsync(init_graph, strm);
         // Currently a CPU sync is needed to read back the total number of
@@ -643,6 +644,7 @@ Manager::Impl * Manager::Impl::make(
 
         if (bps3D_state.has_value()) {
             CountT max_render_entities_per_world = mjx_model.numGeoms;
+            printf("MAX: %ld\n", max_render_entities_per_world);
 
             sim_cfg.bpsBridge = bps3D::initBridge(bps_bridge, mgr_cfg.numWorlds,
                                                   max_render_entities_per_world);

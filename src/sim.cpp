@@ -45,6 +45,7 @@ static void setupRenderTasks(TaskGraphBuilder &builder,
                              Span<const TaskGraphNodeID> deps,
                              const Sim::Config &cfg)
 {
+    printf("%p\n", cfg.bpsBridge);
     if (!cfg.bpsBridge) {
         RenderingSystem::setupTasks(builder, deps);
     } else {
@@ -72,7 +73,7 @@ static void setupInitTasks(TaskGraphBuilder &builder, const Sim::Config &cfg)
     auto sort_sys = queueSortByWorld<CameraEntity>(builder, {});
     sort_sys = queueSortByWorld<RenderEntity>(builder, {sort_sys});
 
-    setupRenderTasks(builder, {sort_sys});
+    setupRenderTasks(builder, {sort_sys}, cfg);
 #else
     setupRenderTasks(builder, {}, cfg);
 #endif
@@ -96,10 +97,17 @@ Sim::Sim(Engine &ctx,
 {
     if (!cfg.bpsBridge) {
         RenderingSystem::init(ctx, cfg.renderBridge);
+    } else {
+        ctx.singleton<BPSBridge>() = *cfg.bpsBridge;
     }
 
     for (CountT geom_idx = 0; geom_idx < (CountT)cfg.numGeoms; geom_idx++) {
-        Entity instance = ctx.makeRenderableEntity<RenderEntity>();
+        Entity instance;
+        if (cfg.bpsBridge) {
+            instance = ctx.makeEntity<RenderEntity>();
+        } else {
+            instance = ctx.makeRenderableEntity<RenderEntity>();
+        }
         ctx.get<Position>(instance) = Vector3::zero();
         ctx.get<Rotation>(instance) = Quat { 1, 0, 0, 0 };
 

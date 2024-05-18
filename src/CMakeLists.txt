@@ -44,6 +44,8 @@ if (TARGET madrona_mw_gpu)
             GPU_HIDESEEK_COMPILE_FLAGS 
         SRCS
             ${SIMULATOR_SRCS}
+        CUSTOM_FLAGS
+            "-I${CMAKE_SOURCE_DIR}/external/bps3D/include"
     )
 
     target_link_libraries(madmjx_mgr PRIVATE
