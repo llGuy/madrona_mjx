@@ -16,15 +16,24 @@
 #include <fstream>
 #include <string>
 
+#include <glm/gtx/string_cast.hpp>
+
 #ifdef MADRONA_CUDA_SUPPORT
 #include <madrona/mw_gpu.hpp>
 #include <madrona/cuda_utils.hpp>
 #endif
 
+#include <bps3D.hpp>
+#include <bps3D_madrona.hpp>
+
+#include <stb_image_write.h>
+
 using namespace madrona;
 using namespace madrona::math;
 using namespace madrona::phys;
 using namespace madrona::py;
+
+using bps3D::BPS3DState;
 
 namespace madMJX {
 
@@ -53,12 +62,16 @@ static inline Optional<RenderGPUState> initRenderGPUState(
     };
 }
 
-static inline render::RenderManager initRenderManager(
+static inline Optional<render::RenderManager> initRenderManager(
     const Manager::Config &mgr_cfg,
     const MJXModel &mjx_model,
     const Optional<VisualizerGPUHandles> &viz_gpu_hdls,
     const Optional<RenderGPUState> &render_gpu_state)
 {
+    if (mgr_cfg.useBPS3D) {
+        return Optional<render::RenderManager>::none();
+    }
+
     render::APIBackend *render_api;
     render::GPUDevice *render_dev;
 
@@ -84,30 +97,47 @@ static inline render::RenderManager initRenderManager(
     });
 }
 
+static inline Optional<BPS3DState> initBPS3D(
+    const Manager::Config &mgr_cfg)
+{
+    if (!mgr_cfg.useBPS3D) {
+        return Optional<BPS3DState>::none();
+    }
+
+    return bps3D::initBPS3D(mgr_cfg.numWorlds,
+        mgr_cfg.batchRenderViewWidth,
+        mgr_cfg.batchRenderViewHeight,
+        (std::filesystem::path(DATA_DIR) / "bps3d.bps").string().c_str());
+}
+
 struct Manager::Impl {
     Config cfg;
     uint32_t numGeoms;
     uint32_t numCams;
     Optional<RenderGPUState> renderGPUState;
-    render::RenderManager renderMgr;
-    uint32_t raycastOutputResolution;
-    bool useRaycaster;
+    Optional<render::RenderManager> renderMgr;
+    Optional<BPS3DState> bps3DState;
+    BPSBridge bpsBridge;
 
     inline Impl(const Manager::Config &mgr_cfg,
                 uint32_t num_geoms,
                 uint32_t num_cams,
                 Optional<RenderGPUState> &&render_gpu_state,
-                render::RenderManager &&render_mgr)
+                Optional<render::RenderManager> &&render_mgr,
+                Optional<BPS3DState> &&bps_3d_state,
+                BPSBridge &&bps_bridge)
         : cfg(mgr_cfg),
           numGeoms(num_geoms),
           numCams(num_cams),
           renderGPUState(std::move(render_gpu_state)),
           renderMgr(std::move(render_mgr)),
-          raycastOutputResolution(mgr_cfg.batchRenderViewWidth),
-          useRaycaster(mgr_cfg.useRaycaster)
+          bps3DState(std::move(bps_3d_state)),
+          bpsBridge(std::move(bps_bridge))
     {
-        if (useRaycaster) {
+        if (mgr_cfg.useRaycaster) {
             printf("Using raycaster\n");
+        } else if (mgr_cfg.useBPS3D) {
+            printf("Using bps\n");
         } else {
             printf("Using rasterizer\n");
         }
@@ -120,6 +150,11 @@ struct Manager::Impl {
     virtual void render(Vector3 *geom_positions, Quat *geom_rotations,
                         Vector3 *cam_positions, Quat *cam_rotations) = 0;
 
+    inline void bpsRender()
+    {
+        bps3D::bpsRender(bps3DState, bpsBridge, cfg.numWorlds);
+    }
+
 #ifdef MADRONA_CUDA_SUPPORT
     virtual void gpuStreamInit(cudaStream_t strm, void **buffers) = 0;
     virtual void gpuStreamRender(cudaStream_t strm, void **buffers) = 0;
@@ -127,9 +162,9 @@ struct Manager::Impl {
 
     inline void renderCommon()
     {
-        if (!useRaycaster) {
-            renderMgr.readECS();
-            renderMgr.batchRender();
+        if (!cfg.useRaycaster) {
+            renderMgr->readECS();
+            renderMgr->batchRender();
         }
     }
 
@@ -153,10 +188,13 @@ struct Manager::CPUImpl final : Manager::Impl {
                    uint32_t num_geoms,
                    uint32_t num_cams,
                    Optional<RenderGPUState> &&render_gpu_state,
-                   render::RenderManager &&render_mgr,
+                   Optional<render::RenderManager> &&render_mgr,
+                   Optional<BPS3DState> &&bps_3d_state,
+                   BPSBridge &&bps_bridge,
                    TaskGraphT &&cpu_exec)
         : Impl(mgr_cfg, num_geoms, num_cams,
-               std::move(render_gpu_state), std::move(render_mgr)),
+               std::move(render_gpu_state), std::move(render_mgr),
+               std::move(bps_bridge), std::move(bps_bridge)),
           cpuExec(std::move(cpu_exec))
     {}
 
@@ -234,10 +272,13 @@ struct Manager::CUDAImpl final : Manager::Impl {
                     uint32_t num_geoms,
                     uint32_t num_cams,
                     Optional<RenderGPUState> &&render_gpu_state,
-                    render::RenderManager &&render_mgr,
+                    Optional<render::RenderManager> &&render_mgr,
+                    Optional<BPS3DState> &&bps_3d_state,
+                    BPSBridge &&bps_bridge,
                     MWCudaExecutor &&gpu_exec)
         : Impl(mgr_cfg, num_geoms, num_cams,
-               std::move(render_gpu_state), std::move(render_mgr)),
+               std::move(render_gpu_state), std::move(render_mgr),
+               std::move(bps_3d_state), std::move(bps_bridge)),
           gpuExec(std::move(gpu_exec)),
           renderGraph(gpuExec.buildLaunchGraph(TaskGraphID::Render,
                                                mgr_cfg.useRaycaster,
@@ -365,9 +406,13 @@ struct Manager::CUDAImpl final : Manager::Impl {
         // Currently a CPU sync is needed to read back the total number of
         // instances for Vulkan
         REQ_CUDA(cudaStreamSynchronize(strm));
-        renderCommon();
 
-        copyOutRendered(jax_io.rgbOut, jax_io.depthOut, strm);
+        if (bps3DState.has_value()) {
+            bpsRender();
+        } else {
+            renderCommon();
+            copyOutRendered(jax_io.rgbOut, jax_io.depthOut, strm);
+        }
     }
 
     virtual void gpuStreamRender(cudaStream_t strm, void **buffers) final
@@ -393,13 +438,16 @@ struct Manager::CUDAImpl final : Manager::Impl {
         // Currently a CPU sync is needed to read back the total number of
         // instances for Vulkan
         REQ_CUDA(cudaStreamSynchronize(strm));
-        if (useRaycaster) {
-            printf("Calling getTimings()\n");
-            gpuExec.getTimings(renderGraph);
+        if (bps3DState.has_value()) {
+            bpsRender();
+        } else {
+            if (cfg.useRaycaster) {
+                printf("Calling getTimings()\n");
+                gpuExec.getTimings(renderGraph);
+            }
+            renderCommon();
+            copyOutRendered(jax_io.rgbOut, jax_io.depthOut, strm);
         }
-        renderCommon();
-
-        copyOutRendered(jax_io.rgbOut, jax_io.depthOut, strm);
     }
 
     virtual inline Tensor exportTensor(ExportID slot,
@@ -566,7 +614,7 @@ Manager::Impl * Manager::Impl::make(
         Optional<RenderGPUState> render_gpu_state =
             initRenderGPUState(mgr_cfg, viz_gpu_hdls);
 
-        render::RenderManager render_mgr =
+        Optional<render::RenderManager> render_mgr =
             initRenderManager(mgr_cfg, mjx_model,
                               viz_gpu_hdls, render_gpu_state);
 
@@ -579,8 +627,25 @@ Manager::Impl * Manager::Impl::make(
         assert(gpu_imported_assets_opt.has_value());
         auto gpu_imported_assets = std::move(*gpu_imported_assets_opt);
 
+        if (render_mgr.has_value()) {
+            sim_cfg.renderBridge = render_mgr.bridge();
+        } else {
+            sim_cfg.renderBridge = nullptr;
+        }
 
-        sim_cfg.renderBridge = render_mgr.bridge();
+        Optional<BPS3DState> bps3D_state = initBPS3D(cfg);
+
+        BPSBridge bps_bridge {};
+
+        if (bps3D_state.has_value()) {
+            CountT max_render_entities_per_world = mjx_model.numGeoms;
+
+            sim_cfg.bpsBridge = bps3D::initBridge(bps_bridge, cfg.numWorlds,
+                                                  max_render_entities_per_world);
+        } else {
+            sim_cfg.bpsBridge = nullptr;
+        }
+
 
         int32_t *geom_types_gpu = (int32_t *)cu::allocGPU(
             sizeof(int32_t) * mjx_model.numGeoms);
@@ -636,6 +701,8 @@ Manager::Impl * Manager::Impl::make(
             mjx_model.numCams,
             std::move(render_gpu_state),
             std::move(render_mgr),
+            std::move(bps_3d_state),
+            std::move(bps_bridge),
             std::move(gpu_exec),
         };
 #else
@@ -675,6 +742,8 @@ Manager::Impl * Manager::Impl::make(
             mjx_model.numCams,
             std::move(render_gpu_state),
             std::move(render_mgr),
+            Optional<BPS3DState>::none(),
+            BPSBridge {},
             std::move(cpu_exec),
         };
 
@@ -767,7 +836,7 @@ Tensor Manager::cameraRotationsTensor() const
 
 Tensor Manager::rgbTensor() const
 {
-    const uint8_t *rgb_ptr = impl_->renderMgr.batchRendererRGBOut();
+    const uint8_t *rgb_ptr = impl_->renderMgr->batchRendererRGBOut();
 
     return Tensor((void*)rgb_ptr, TensorElementType::UInt8, {
         impl_->cfg.numWorlds,
@@ -780,7 +849,7 @@ Tensor Manager::rgbTensor() const
 
 Tensor Manager::depthTensor() const
 {
-    const float *depth_ptr = impl_->renderMgr.batchRendererDepthOut();
+    const float *depth_ptr = impl_->renderMgr->batchRendererDepthOut();
 
     return Tensor((void *)depth_ptr, TensorElementType::Float32, {
         impl_->cfg.numWorlds,
@@ -821,7 +890,61 @@ madrona::ExecMode Manager::execMode() const
 
 render::RenderManager & Manager::getRenderManager()
 {
-    return impl_->renderMgr;
+    return *impl_->renderMgr;
+}
+
+void Manager::bpsDumpRGB() const
+{
+    static int num_frames = 0;
+    float *gpu_ptr = impl_->bps3DState->renderer.getDepthPointer();
+
+    uint32_t img_width = impl_->cfg.batchRenderViewWidth;
+    uint32_t img_height = impl_->cfg.batchRenderViewHeight;
+
+    uint64_t num_bytes = (uint64_t)impl_->cfg.numWorlds *
+        (uint64_t)img_width * (uint64_t)img_height * sizeof(float);
+
+    float *cpu_ptr = (float *)cu::allocReadback(num_bytes);
+    cudaMemcpy(cpu_ptr, gpu_ptr, num_bytes, cudaMemcpyDeviceToHost);
+
+    uint8_t *out_ptr = (uint8_t *)malloc(
+        (uint64_t)img_width * (uint64_t)img_height * 4);
+
+    for (uint32_t i = 0; i < impl_->cfg.numWorlds; i++) {
+        float *src = cpu_ptr + (uint64_t)i * 
+            (uint64_t)img_width * (uint64_t)img_height;
+
+        for (uint32_t y = 0; y < img_height; y++) {
+            for (int x = 0; x < img_height; x++) {
+                float depth = src[y * img_width + x];
+                depth = std::clamp(depth, 0.f, 1.f);
+#if 0
+                if (x == 0 && y == 0) {
+                    printf("%f\n", depth);
+                }
+#endif
+
+                uint8_t *out_base = out_ptr + y * img_width * 4 + x * 4;
+                for (int c = 0; c < 3; c++) {
+                    out_base[c] = uint8_t(depth * 255.f);
+                }
+                out_base[3] = 255;
+            }
+        }
+
+        stbi_write_bmp((std::string("/tmp/t/img_") + 
+                        std::to_string(i) + "_" + 
+                        std::to_string(num_frames)).c_str(),
+            impl_->cfg.batchRenderViewWidth,
+            impl_->cfg.batchRenderViewHeight,
+            4,
+            out_ptr);
+    }
+
+    free(out_ptr);
+    cudaFree(cpu_ptr);
+
+    num_frames += 1;
 }
 
 }
