@@ -104,8 +104,8 @@ class AlohaBringToTarget(PipelineEnv):
 
     data = self.pipeline_step(state.pipeline_state, ctrl)
 
-    render_token, rgb, depth = self.renderer.render(state.info['render_token'], data)
-    state.info.update({'render_token': render_token, 'rgb': rgb, 'depth': depth})
+    _, rgb, depth = self.renderer.render(state.info['render_token'], data)
+    state.info.update({'rgb': rgb, 'depth': depth})
 
     target_pos = state.info['target_pos']
     box_pos = data.xpos[self._box_body_index]
