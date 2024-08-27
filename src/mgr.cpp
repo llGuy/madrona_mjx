@@ -82,7 +82,7 @@ static inline Optional<render::RenderManager> initRenderManager(
 
     return render::RenderManager(render_api, render_dev, {
         .enableBatchRenderer = true,
-        .renderMode = render::RenderManager::Config::RenderMode::Depth,
+        .renderMode = render::RenderManager::Config::RenderMode::RGBD,
         .agentViewWidth = mgr_cfg.batchRenderViewWidth,
         .agentViewHeight = mgr_cfg.batchRenderViewHeight,
         .numWorlds = mgr_cfg.numWorlds,
@@ -238,6 +238,15 @@ struct Manager::Impl {
             return (float *)gpuExec.getExported((uint32_t)ExportID::RaycastDepth);
         } else {
             return renderMgr->batchRendererDepthOut();
+        }
+    }
+
+    inline const uint8_t * getRGBOut() const
+    {
+        if (cfg.useRT) {
+            return (uint8_t *)gpuExec.getExported((uint32_t)ExportID::RaycastColor);
+        } else {
+            return renderMgr->batchRendererRGBOut();
         }
     }
 
@@ -492,7 +501,7 @@ Manager::Impl * Manager::Impl::make(
         Optional<CudaBatchRenderConfig>::none();
     if (use_rt) {
         render_cfg = {
-            .renderMode = CudaBatchRenderConfig::RenderMode::Depth,
+            .renderMode = CudaBatchRenderConfig::RenderMode::RGBD,
             .geoBVHData = rt_assets.bvhData,
             .materialData = rt_assets.matData,
             .renderResolution = mgr_cfg.batchRenderViewWidth,
@@ -617,9 +626,7 @@ Tensor Manager::cameraRotationsTensor() const
 
 Tensor Manager::rgbTensor() const
 {
-    FATAL("No RGB support currently");
-#if 0
-    const uint8_t *rgb_ptr = impl_->renderMgr->batchRendererRGBOut();
+    const uint8_t *rgb_ptr = impl_->getRGBOut();
 
     return Tensor((void*)rgb_ptr, TensorElementType::UInt8, {
         impl_->cfg.numWorlds,
@@ -628,7 +635,6 @@ Tensor Manager::rgbTensor() const
         impl_->cfg.batchRenderViewWidth,
         4,
     }, impl_->cfg.gpuID);
-#endif
 }
 
 Tensor Manager::depthTensor() const

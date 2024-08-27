@@ -44,6 +44,8 @@ void Sim::registerTypes(ECSRegistry &registry, const Config &cfg)
     if (cfg.useRT) {
         registry.exportColumn<render::RaycastOutputArchetype, 
             render::DepthOutputBuffer>((uint32_t)ExportID::RaycastDepth);
+        registry.exportColumn<render::RaycastOutputArchetype, 
+            render::RGBOutputBuffer>((uint32_t)ExportID::RaycastColor);
     }
 }
 

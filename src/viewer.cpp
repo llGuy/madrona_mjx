@@ -86,7 +86,7 @@ struct Visualizer {
                 raycast_output_resolution;
             print_ptr = (unsigned char*)cu::allocReadback(num_bytes);
 
-            char *raycast_tensor = (char *)(mgr.depthTensor().devicePtr());
+            char *raycast_tensor = (char *)(mgr.rgbTensor().devicePtr());
 
             uint32_t bytes_per_image = 4 * raycast_output_resolution * 
                 raycast_output_resolution;
@@ -116,9 +116,9 @@ struct Visualizer {
                 for (int j = 0; j < (int)raycast_output_resolution; j++) {
                     uint32_t linear_idx = 4 * (j + i * raycast_output_resolution);
 
+#if 0
                     float *depth = (float *)(raycasters + linear_idx);
 
-                    // float depth_convert = std::max(0.0f, std::min(255.0f * (1.0f / (*depth)), 255.0f));
                     float depth_convert = 255.0f * (*depth) / 4.f;
                     depth_convert = std::min(255.f, std::max(0.f, depth_convert));
 
@@ -126,6 +126,15 @@ struct Visualizer {
                             (uint8_t)depth_convert,
                             (uint8_t)depth_convert,
                             (uint8_t)depth_convert, 
+                            255);
+#endif
+
+                    uint8_t *rgb = (uint8_t *)(raycasters + linear_idx);
+
+                    auto realColor = IM_COL32(
+                            rgb[0],
+                            rgb[1],
+                            rgb[2], 
                             255);
 
                     draw2->AddRectFilled(
