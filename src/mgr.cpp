@@ -253,11 +253,16 @@ struct Manager::Impl {
     inline void copyOutRendered(uint8_t *rgb_out, float *depth_out,
                                 cudaStream_t strm)
     {
-        // FIXME we just don't touch RGB now
-        (void)rgb_out;
-        
         cudaMemcpyAsync(depth_out, getDepthOut(),
                         sizeof(float) *
+                        (size_t)cfg.batchRenderViewWidth *
+                        (size_t)cfg.batchRenderViewHeight *
+                        (size_t)cfg.numWorlds *
+                        (size_t)numCams,
+                        cudaMemcpyDeviceToDevice, strm);
+
+        cudaMemcpyAsync(rgb_out, getRGBOut(),
+                        4 * sizeof(uint8_t) *
                         (size_t)cfg.batchRenderViewWidth *
                         (size_t)cfg.batchRenderViewHeight *
                         (size_t)cfg.numWorlds *
@@ -290,6 +295,8 @@ struct Manager::Impl {
 
     inline void gpuStreamRender(cudaStream_t strm, void **buffers)
     {
+        printf("in ::gpuStreamRender()\n");
+
         JAXIO jax_io = JAXIO::make(buffers);
 
         copyInTransforms(jax_io.geomPositions, jax_io.geomRotations,
