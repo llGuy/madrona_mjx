@@ -20,6 +20,8 @@
 #include <madrona/cuda_utils.hpp>
 #endif
 
+#include <stb_image_write.h>
+
 using namespace madrona;
 using namespace madrona::math;
 using namespace madrona::phys;
@@ -122,6 +124,89 @@ struct JAXIO {
         };
     }
 };
+
+enum class ColorType {
+    RGB, Depth
+};
+
+struct DumpInfo {
+    std::string outputPath;
+
+    // Pointer to CUDA memory containing the images.
+    void *gpuTensor;
+
+    // We will calculate what the best resolution is for this output.
+    uint32_t numImages;
+
+    // Resolution of each individual imagea
+    uint32_t imageResolution;
+
+    ColorType colorType;
+};
+
+static void transposeImage(char *output, 
+                    const char *input,
+                    uint32_t res)
+{
+    for (uint32_t y = 0; y < res; ++y) {
+        for (uint32_t x = 0; x < res; ++x) {
+            output[4*(y + x * res) + 0] = input[4*(x + y * res) + 0];
+            output[4*(y + x * res) + 1] = input[4*(x + y * res) + 1];
+            output[4*(y + x * res) + 2] = input[4*(x + y * res) + 2];
+            output[4*(y + x * res) + 3] = input[4*(x + y * res) + 3];
+        }
+    }
+}
+
+static void dumpImages(const DumpInfo &info,
+                       const char *dir_out_cstr,
+                       const char *name_base_cstr)
+{
+    using namespace madrona;
+
+    std::string dir_out = std::string(dir_out_cstr);
+
+    uint32_t num_images_total = info.numImages;
+    uint32_t output_resolution = info.imageResolution;
+
+    unsigned char* print_ptr;
+    int64_t num_bytes = 4 * output_resolution * output_resolution * num_images_total;
+    print_ptr = (unsigned char*)cu::allocReadback(num_bytes);
+
+    char *raycast_tensor = (char *)info.gpuTensor;
+
+    // 4 is the size of each pixel regardless of RGB or depth
+    uint32_t bytes_per_image = 4 * output_resolution * output_resolution;
+    uint32_t row_stride_bytes = 4 * output_resolution;
+
+    uint32_t image_idx = 0;
+
+    uint32_t base_image_idx = num_images_total * (image_idx / num_images_total);
+
+    raycast_tensor += image_idx * bytes_per_image;
+
+    cudaMemcpy(print_ptr, raycast_tensor,
+            num_bytes,
+            cudaMemcpyDeviceToHost);
+    raycast_tensor = (char *)print_ptr;
+
+    char *tmp_image_memory = (char *)calloc(bytes_per_image, 1);
+
+    for (int i = 0; i < num_images_total; ++i) {
+        std::string out_file_name = dir_out + 
+                                    "/" + std::string(name_base_cstr) +
+                                    std::to_string(i) +
+                                    ".png";
+
+        const char *input_image = raycast_tensor + i * bytes_per_image;
+        transposeImage(tmp_image_memory, input_image, output_resolution);
+
+        stbi_write_png(out_file_name.c_str(), output_resolution, output_resolution,
+                4, tmp_image_memory, 4 * output_resolution);
+    }
+
+    free(tmp_image_memory);
+}
 
 struct Manager::Impl {
     Config cfg;
@@ -295,24 +380,10 @@ struct Manager::Impl {
 
     inline void gpuStreamRender(cudaStream_t strm, void **buffers)
     {
-        printf("in ::gpuStreamRender()\n");
-
         JAXIO jax_io = JAXIO::make(buffers);
 
         copyInTransforms(jax_io.geomPositions, jax_io.geomRotations,
                          jax_io.camPositions, jax_io.camRotations, strm);
-
-#if 0
-        Vector3 *readback_pos = (Vector3 *)malloc(sizeof(Vector3) * numGeoms * cfg.numWorlds);
-        cudaMemcpy(jax_io.geomPositions,
-                   readback_pos,
-                   sizeof(Vector3) * numGeoms * cfg.numWorlds,
-                   cudaMemcpyHostToDevice);
-        printf("%f %f %f\n",
-            readback_pos[1].x,
-            readback_pos[1].y,
-            readback_pos[1].z);
-#endif
 
         gpuExec.runAsync(renderGraph, strm);
         // Currently a CPU sync is needed to read back the total number of

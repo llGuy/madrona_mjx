@@ -29,6 +29,7 @@ target_link_libraries(madmjx_mgr
         madrona_physics_loader
         madrona_render
         madrona_render_asset_processor
+        stb
 )
 
 if (TARGET madrona_mw_gpu)

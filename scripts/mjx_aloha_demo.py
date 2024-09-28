@@ -87,7 +87,7 @@ args = arg_parser.parse_args()
 # the batch renderer
 def limit_jax_mem(limit):
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = f"{limit:.2f}"
-limit_jax_mem(0.55)
+limit_jax_mem(0.2)
 
 # Tell XLA to use Triton GEMM
 xla_flags = os.environ.get('XLA_FLAGS', '')
@@ -164,6 +164,11 @@ if __name__ == '__main__':
   # render a video for a single env/camera
   for i in range(env.sys.ncam):
     depths = np.array([txfm_depth(r.info['depth'][0, i, ...]) for r in rollout])
+    rgba_frames = np.array([r.info['rgb'][0, i, ...] for r in rollout])
+
+    rgb_frames = rgba_frames[..., :3]
+
+    media.write_video(f'video_madrona_rgb_{i}.mp4', rgb_frames, fps=1.0 / env.dt)
     media.write_video(f'video_madrona_{i}.mp4', depths, fps=1.0 / env.dt)
 
     if args.render_mj:
